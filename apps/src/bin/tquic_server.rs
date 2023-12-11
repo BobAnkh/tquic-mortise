@@ -29,6 +29,7 @@ use log::error;
 use mio::event::Event;
 use rustc_hash::FxHashMap;
 
+use tquic::CongestionControlAlgorithm;
 use tquic::h3::connection::Http3Connection;
 use tquic::h3::Header;
 use tquic::h3::Http3Config;
@@ -133,6 +134,10 @@ pub struct ServerOpt {
     /// Batch size for sending packets.
     #[clap(long, default_value = "16", value_name = "NUM")]
     pub send_batch_size: usize,
+
+    /// Congestion Control Algorithm.
+    #[clap(short='C', long, default_value = "cubic")]
+    pub cong_control: CongestionControlAlgorithm,
 }
 
 const MAX_BUF_SIZE: usize = 65536;
@@ -166,6 +171,7 @@ impl Server {
         config.set_send_batch_size(option.send_batch_size);
         config.set_multipath(option.enable_multipath);
         config.set_multipath_algor(option.multipath_algor);
+        config.set_congestion_control_algorithm(option.cong_control);
 
         if let Some(address_token_key) = &option.address_token_key {
             let address_token_key = convert_address_token_key(address_token_key);

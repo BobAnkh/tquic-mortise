@@ -45,6 +45,7 @@ use statrs::statistics::Distribution;
 use statrs::statistics::Max;
 use statrs::statistics::Min;
 use statrs::statistics::OrderStatistics;
+use tquic::CongestionControlAlgorithm;
 use tquic::h3::NameValue;
 use url::Url;
 
@@ -188,6 +189,10 @@ pub struct ClientOpt {
     /// Batch size for sending packets.
     #[clap(long, default_value = "1", value_name = "NUM")]
     pub send_batch_size: usize,
+
+    /// Congestion Control Algorithm.
+    #[clap(short='C', long, default_value = "cubic")]
+    pub cong_control: CongestionControlAlgorithm,
 }
 
 const MAX_BUF_SIZE: usize = 65536;
@@ -387,6 +392,7 @@ impl Worker {
         config.set_send_udp_payload_size(option.send_udp_payload_size);
         config.set_multipath(option.enable_multipath);
         config.set_multipath_algor(option.multipath_algor);
+        config.set_congestion_control_algorithm(option.cong_control);
         let tls_config =
             TlsConfig::new_client_config(option.alpn.clone(), option.enable_early_data)?;
         config.set_tls_config(tls_config);
