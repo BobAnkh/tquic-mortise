@@ -45,8 +45,8 @@ use statrs::statistics::Distribution;
 use statrs::statistics::Max;
 use statrs::statistics::Min;
 use statrs::statistics::OrderStatistics;
-use tquic::CongestionControlAlgorithm;
 use tquic::h3::NameValue;
+use tquic::CongestionControlAlgorithm;
 use url::Url;
 
 use tquic::connection::ConnectionStats;
@@ -191,7 +191,7 @@ pub struct ClientOpt {
     pub send_batch_size: usize,
 
     /// Congestion Control Algorithm.
-    #[clap(short='C', long, default_value = "cubic")]
+    #[clap(short = 'C', long, default_value = "cubic")]
     pub cong_control: CongestionControlAlgorithm,
 }
 

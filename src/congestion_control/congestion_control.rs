@@ -14,13 +14,17 @@
 
 #![allow(unused_variables)]
 
+use core::str::FromStr;
+
 use std::any::Any;
 use std::fmt;
 use std::time::Instant;
 
 use crate::connection::rtt::RttEstimator;
 use crate::connection::space::SentPacket;
+use crate::Error;
 use crate::RecoveryConfig;
+use crate::Result;
 pub use bbr::Bbr;
 pub use bbr::BbrConfig;
 pub use bbr3::Bbr3;
@@ -58,6 +62,24 @@ pub enum CongestionControlAlgorithm {
     /// and delay can be configured via a user-specified parameter.
     /// (Experimental)
     Copa,
+}
+
+impl FromStr for CongestionControlAlgorithm {
+    type Err = Error;
+
+    fn from_str(algor: &str) -> Result<CongestionControlAlgorithm> {
+        if algor.eq_ignore_ascii_case("cubic") {
+            Ok(CongestionControlAlgorithm::Cubic)
+        } else if algor.eq_ignore_ascii_case("bbr") {
+            Ok(CongestionControlAlgorithm::Bbr)
+        } else if algor.eq_ignore_ascii_case("bbr3") {
+            Ok(CongestionControlAlgorithm::Bbr3)
+        } else if algor.eq_ignore_ascii_case("copa") {
+            Ok(CongestionControlAlgorithm::Copa)
+        } else {
+            Err(Error::InvalidConfig("unknown".into()))
+        }
+    }
 }
 
 /// Congestion control statistics.
@@ -157,7 +179,10 @@ impl fmt::Debug for dyn CongestionController {
 }
 
 /// Build a congestion controller.
-pub fn build_congestion_controller(conf: &RecoveryConfig) -> Box<dyn CongestionController> {
+pub fn build_congestion_controller(
+    conf: &RecoveryConfig,
+    connection_trace_id: String,
+) -> Box<dyn CongestionController> {
     let max_datagram_size: u64 = conf.max_datagram_size as u64;
     let min_cwnd = conf.min_congestion_window.saturating_mul(max_datagram_size);
     let initial_cwnd = conf
@@ -183,12 +208,15 @@ pub fn build_congestion_controller(conf: &RecoveryConfig) -> Box<dyn CongestionC
             Some(conf.initial_rtt),
             max_datagram_size,
         ))),
-        CongestionControlAlgorithm::Copa => Box::new(Copa::new(CopaConfig::new(
-            min_cwnd,
-            initial_cwnd,
-            Some(conf.initial_rtt),
-            max_datagram_size,
-        ))),
+        CongestionControlAlgorithm::Copa => Box::new(Copa::new(
+            CopaConfig::new(
+                min_cwnd,
+                initial_cwnd,
+                Some(conf.initial_rtt),
+                max_datagram_size,
+            ),
+            connection_trace_id,
+        )),
     }
 }
 

@@ -29,12 +29,12 @@ use log::error;
 use mio::event::Event;
 use rustc_hash::FxHashMap;
 
-use tquic::CongestionControlAlgorithm;
 use tquic::h3::connection::Http3Connection;
 use tquic::h3::Header;
 use tquic::h3::Http3Config;
 use tquic::h3::NameValue;
 use tquic::Config;
+use tquic::CongestionControlAlgorithm;
 use tquic::Connection;
 use tquic::Endpoint;
 use tquic::Error;
@@ -136,7 +136,7 @@ pub struct ServerOpt {
     pub send_batch_size: usize,
 
     /// Congestion Control Algorithm.
-    #[clap(short='C', long, default_value = "cubic")]
+    #[clap(short = 'C', long, default_value = "cubic")]
     pub cong_control: CongestionControlAlgorithm,
 }
 
