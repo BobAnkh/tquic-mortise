@@ -105,7 +105,7 @@ pub struct Recovery {
 }
 
 impl Recovery {
-    pub(super) fn new(conf: &RecoveryConfig) -> Self {
+    pub(super) fn new(conf: &RecoveryConfig, connection_trace_id: String) -> Self {
         Recovery {
             max_ack_delay: conf.max_ack_delay,
             max_datagram_size: conf.max_datagram_size,
@@ -118,7 +118,7 @@ impl Recovery {
             bytes_in_flight: 0,
             ack_eliciting_in_flight: 0,
             rtt: RttEstimator::new(conf.initial_rtt),
-            congestion: congestion_control::build_congestion_controller(conf),
+            congestion: congestion_control::build_congestion_controller(conf, connection_trace_id),
             stats: PathStats::default(),
             last_metrics: RecoveryMetrics::default(),
             trace_id: String::from(""),
@@ -1115,7 +1115,7 @@ mod tests {
     #[test]
     fn loss_on_timeout() -> Result<()> {
         let conf = new_test_recovery_config();
-        let mut recovery = Recovery::new(&conf);
+        let mut recovery = Recovery::new(&conf, String::new());
         let mut spaces = PacketNumSpaceMap::new();
         let space_id = SpaceId::Handshake;
         let status = HandshakeStatus {
@@ -1181,7 +1181,7 @@ mod tests {
     #[test]
     fn loss_on_reordering() -> Result<()> {
         let conf = new_test_recovery_config();
-        let mut recovery = Recovery::new(&conf);
+        let mut recovery = Recovery::new(&conf, String::new());
         let mut spaces = PacketNumSpaceMap::new();
         let space_id = SpaceId::Handshake;
         let status = HandshakeStatus {
@@ -1265,7 +1265,7 @@ mod tests {
     #[test]
     fn pto() -> Result<()> {
         let conf = new_test_recovery_config();
-        let mut recovery = Recovery::new(&conf);
+        let mut recovery = Recovery::new(&conf, String::new());
         let mut spaces = PacketNumSpaceMap::new();
         let space_id = SpaceId::Handshake;
         let status = HandshakeStatus {
@@ -1321,7 +1321,7 @@ mod tests {
     #[test]
     fn discard_pkt_num_space() -> Result<()> {
         let conf = new_test_recovery_config();
-        let mut recovery = Recovery::new(&conf);
+        let mut recovery = Recovery::new(&conf, String::new());
         let mut spaces = PacketNumSpaceMap::new();
         let space_id = SpaceId::Handshake;
         let status = HandshakeStatus {
@@ -1429,7 +1429,7 @@ mod tests {
     #[test]
     fn detect_acked_packets() -> Result<()> {
         let conf = new_test_recovery_config();
-        let mut recovery = Recovery::new(&conf);
+        let mut recovery = Recovery::new(&conf, String::new());
         let mut spaces = PacketNumSpaceMap::new();
         let status = HandshakeStatus {
             derived_handshake_keys: true,

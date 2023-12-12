@@ -22,10 +22,18 @@
 //!
 //! See <https://web.mit.edu/copa/>.
 
+use std::io::Read;
+use std::io::Write;
+use std::os::unix::net::UnixStream;
 use std::time::Duration;
 use std::time::Instant;
 
 use log::*;
+use mortise_common::qoe::QuicAppInfo;
+use mortise_common::report::ReportEntry;
+use serde::{Deserialize, Serialize};
+use shared_memory::Shmem;
+use shared_memory::ShmemConf;
 
 use super::minmax::MinMax;
 use super::CongestionController;
@@ -230,7 +238,6 @@ struct RoundTripCounter {
 /// Copa: Practical Delay-Based Congestion Control for the Internet.
 ///
 /// See <https://web.mit.edu/copa/>.
-#[derive(Debug)]
 pub struct Copa {
     /// Config
     config: CopaConfig,
@@ -277,13 +284,92 @@ pub struct Copa {
 
     /// Round trip counter.
     round: RoundTripCounter,
+
+    /// To identify which connection is using this Copa.
+    connection_trace_id: String,
+
+    /// To identify the connection from user-space
+    flow_id: u32,
+
+    /// Connection to manager unix domain socket
+    stream: UnixStream,
+
+    /// Store user-defined shared memory handler
+    shared_memory_handler: Option<Shmem>,
+
+    /// Connection to python manager unix domain socket
+    py_stream: Option<UnixStream>,
+}
+
+impl std::fmt::Debug for Copa {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        f.debug_struct("Copa")
+            .field("config", &self.config)
+            .field("stats", &self.stats)
+            .field("init_time", &self.init_time)
+            .field("mode", &self.mode)
+            .field("slow_start", &self.slow_start)
+            .field("cwnd", &self.cwnd)
+            .field("velocity", &self.velocity)
+            .field("delta", &self.delta)
+            .field("standing_rtt_filter", &self.standing_rtt_filter)
+            .field("min_rtt_filter", &self.min_rtt_filter)
+            .field("ack_state", &self.ack_state)
+            .field("increase_cwnd", &self.increase_cwnd)
+            .field("target_rate", &self.target_rate)
+            .field("last_sent_pkt_num", &self.last_sent_pkt_num)
+            .field("round", &self.round)
+            .field("connection_trace_id", &self.connection_trace_id)
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum FlowOperation<'a> {
+    Connect(&'a str),
+    Disconnect(&'a str),
+}
+
+impl Drop for Copa {
+    fn drop(&mut self) {
+        // Disconnect the flow with connection_trace_id through UDS. (Disconnect)
+        let payload = FlowOperation::Disconnect(&self.connection_trace_id);
+        let payload = serde_json::to_vec(&payload).unwrap();
+        let len = (payload.len() as u32).to_be_bytes();
+        self.stream.write_all(&len).unwrap();
+        self.stream.write_all(&payload).unwrap();
+    }
 }
 
 impl Copa {
-    pub fn new(config: CopaConfig) -> Self {
+    pub fn new(config: CopaConfig, connection_trace_id: String) -> Self {
         let slow_start_delta = config.slow_start_delta;
         let initial_cwnd = config.initial_cwnd;
-
+        // Connect the flow with connection_trace_id through UDS. (Connect)
+        let mut stream = UnixStream::connect("/tmp/mortise-quic.sock").unwrap();
+        let payload = FlowOperation::Connect(&connection_trace_id);
+        let payload = serde_json::to_vec(&payload).unwrap();
+        let len = (payload.len() as u32).to_be_bytes();
+        stream.write_all(&len).unwrap();
+        stream.write_all(&payload).unwrap();
+        let mut buf: [u8; 4] = [0; 4];
+        // Read the length
+        stream.read_exact(&mut buf).unwrap();
+        // Read the exact flow_id
+        stream.read_exact(&mut buf).unwrap();
+        let flow_id = u32::from_be_bytes(buf);
+        let py_stream = UnixStream::connect("/tmp/mortise-py.sock")
+            .map_err(|e| log::error!("Test error {}", e))
+            .ok();
+        // An example on how to report to python manager
+        // let mut report = ReportEntry::default();
+        // report.flow_id = flow_id;
+        // if let Some(ref mut s) = py_stream {
+        //     let payload = report.as_bytes();
+        //     let len = (payload.len() as u32).to_be_bytes();
+        //     s.write_all(&len).unwrap();
+        //     s.write_all(&payload).unwrap();
+        // }
         Self {
             config,
             stats: Default::default(),
@@ -300,6 +386,11 @@ impl Copa {
             target_rate: 0,
             last_sent_pkt_num: 0,
             round: Default::default(),
+            connection_trace_id,
+            flow_id,
+            stream,
+            shared_memory_handler: None,
+            py_stream,
         }
     }
 
@@ -655,6 +746,23 @@ impl CongestionController for Copa {
         bytes_in_flight: u64,
     ) {
         // Update stats.
+        // An example of how to get app_info
+        if let None = self.shared_memory_handler {
+            self.shared_memory_handler = ShmemConf::new()
+                .flink(format!("/tmp/mortise-quic-app-info-{}", self.flow_id))
+                .open()
+                .map_err(|e| log::error!("{}", e))
+                .ok();
+        }
+        if let Some(ref mut h) = self.shared_memory_handler {
+            unsafe {
+                let app_info = QuicAppInfo::from_mut_bytes(h.as_slice_mut());
+                if app_info.resp != 1 {
+                    log::info!("get app info {}", app_info.req);
+                    app_info.resp = 1;
+                }
+            }
+        }
         let sent_time = packet.time_sent;
         let acked_bytes = packet.sent_size as u64;
 

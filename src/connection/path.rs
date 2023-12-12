@@ -118,7 +118,7 @@ impl Path {
             scid_seq,
             dcid_seq,
             active: false,
-            recovery: Recovery::new(conf),
+            recovery: Recovery::new(conf, trace_id.to_string()),
             state,
             recv_chals: VecDeque::new(),
             sent_chals: VecDeque::new(),
