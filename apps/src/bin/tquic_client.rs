@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::time;
 use std::cell::RefCell;
 use std::cell::RefMut;
 use std::cmp;
 use std::cmp::max;
 use std::fs::create_dir_all;
 use std::fs::File;
+use std::io;
+use std::io::BufRead;
 use std::io::BufWriter;
 use std::io::Write;
 use std::net::Ipv4Addr;
@@ -82,11 +85,11 @@ pub struct ClientOpt {
     pub threads: u32,
 
     /// Number of concurrent connections per thread.
-    #[clap(long, default_value = "1", value_name = "NUM")]
+    #[clap(long, default_value = "4", value_name = "NUM")]
     pub max_concurrent_conns: u32,
 
     /// Number of requests per thread. "0" means infinity mode.
-    #[clap(long, default_value = "1", value_name = "NUM")]
+    #[clap(long, default_value = "0", value_name = "NUM")]
     pub max_requests_per_thread: u64,
 
     /// Number of max requests per connection. "0" means infinity mode.
@@ -99,7 +102,7 @@ pub struct ClientOpt {
 
     /// Benchmarking duration in seconds. "0" means infinity mode.
     /// Client will exit if either the max_requests or duration is reached.
-    #[clap(short, long, default_value = "0", value_name = "TIME")]
+    #[clap(short, long, default_value = "60", value_name = "TIME")]
     pub duration: u64,
 
     /// Number of max samples per thread used for request time statistics.
@@ -193,6 +196,10 @@ pub struct ClientOpt {
     /// Congestion Control Algorithm.
     #[clap(short = 'C', long, default_value = "cubic")]
     pub cong_control: CongestionControlAlgorithm,
+
+    /// Path to the trace file. NOTICE: use only one thread for test and one request per connection
+    #[clap(long, value_name = "FILE")]
+    pub trace_file: Option<String>,
 }
 
 const MAX_BUF_SIZE: usize = 65536;
@@ -435,17 +442,19 @@ impl Worker {
         let mut events = mio::Events::with_capacity(1024);
         loop {
             if self.process()? {
-                debug!("worker tasks finished, exit");
                 break;
             }
 
-            let timeout = self
+            let mut timeout = self
                 .endpoint
                 .timeout()
                 .map(|v| cmp::max(v, TIMER_GRANULARITY));
-
+            
+            if timeout.is_none() {
+                timeout = Some(TIMER_GRANULARITY);
+            }
+            
             self.poll.poll(&mut events, timeout)?;
-
             // Process timeout events
             if events.is_empty() {
                 self.endpoint.on_timeout(Instant::now());
@@ -470,16 +479,26 @@ impl Worker {
         self.endpoint.process_connections()?;
 
         {
-            let worker_ctx = self.worker_ctx.borrow();
-            debug!("worker concurrent conns {}", worker_ctx.concurrent_conns);
+            let mut worker_ctx = self.worker_ctx.borrow_mut();
+            
+            // Check and add new conns to send single request
+            // One requst per connection
+            let current_time = Instant::now();
+            while worker_ctx.next_trace_idx < worker_ctx.trace_timestamps.len() &&
+                current_time.duration_since(self.start_time).as_millis() >= worker_ctx.trace_timestamps[worker_ctx.next_trace_idx] as u128 {
+                worker_ctx.next_trace_idx += 1;
+                worker_ctx.request_to_send += 1;
+                println!("current time {} worker request to send {}", current_time.duration_since(self.start_time).as_millis(), worker_ctx.request_to_send);
+            }
 
             // Check close.
             if (self.option.duration > 0
                 && (Instant::now() - self.start_time).as_secs() > self.option.duration)
                 || (self.option.max_requests_per_thread > 0
                     && worker_ctx.request_done >= self.option.max_requests_per_thread)
+                || worker_ctx.next_trace_idx >= worker_ctx.trace_timestamps.len()
             {
-                debug!(
+                println!(
                     "worker should exit, concurrent conns {}, request sent {}, request done {}",
                     worker_ctx.concurrent_conns, worker_ctx.request_sent, worker_ctx.request_done,
                 );
@@ -509,6 +528,7 @@ impl Worker {
             }
         }
 
+
         // Check and create new connections.
         self.create_new_conns()?;
 
@@ -520,7 +540,7 @@ impl Worker {
 
     fn create_new_conns(&mut self) -> Result<()> {
         let mut worker_ctx = self.worker_ctx.borrow_mut();
-        while worker_ctx.concurrent_conns < self.option.max_concurrent_conns {
+        while worker_ctx.concurrent_conns < self.option.max_concurrent_conns && worker_ctx.request_to_send > 0 {
             match self.endpoint.connect(
                 self.sock.local_addr(),
                 self.remote,
@@ -531,6 +551,8 @@ impl Worker {
                 Ok(_) => {
                     worker_ctx.concurrent_conns += 1;
                     worker_ctx.conn_total += 1;
+                    worker_ctx.request_to_send -= 1;
+                    println!("worker concurrent conns {}, request sent {}, request done {}", worker_ctx.concurrent_conns, worker_ctx.request_sent, worker_ctx.request_done);
                 }
                 Err(e) => {
                     return Err(format!("connect error: {:?}", e).into());
@@ -614,9 +636,14 @@ impl Worker {
 #[derive(Default)]
 struct WorkerContext {
     session: Option<Vec<u8>>,
+    request_to_send: u64,
     request_sent: u64,
     request_done: u64,
     request_success: u64,
+    resp_sizes: Vec<u64>,
+    resp_size_idx: usize,
+    trace_timestamps: Vec<u64>,
+    next_trace_idx: usize,
     max_sample: usize,
     request_time_samples: Vec<f64>,
     conn_total: u64,
@@ -642,6 +669,30 @@ impl WorkerContext {
                 debug!("no session file {:?}", option.session_file);
             }
         }
+
+        let mut timestamps = Vec::new();
+        let mut response_sizes = Vec::new();
+
+        if let Some(trace_file) = &option.trace_file {
+            let trace = File::open(trace_file).unwrap();
+            let reader = io::BufReader::new(trace);
+            for line in reader.lines() {
+                let line = line.unwrap();
+                let parts: Vec<&str> = line.split_whitespace().collect();
+        
+                if parts.len() == 2 {
+                    let timestamp = parts[0].parse::<u64>().unwrap_or(0);
+                    let response_size = parts[1].parse::<u64>().unwrap_or(0);
+        
+                    timestamps.push(timestamp);
+                    response_sizes.push(response_size);
+                }
+            }
+        }
+        worker_ctx.trace_timestamps = timestamps;
+        worker_ctx.resp_sizes = response_sizes;
+        worker_ctx.resp_size_idx = 0;
+        worker_ctx.next_trace_idx = 0;
 
         worker_ctx
     }
@@ -689,7 +740,7 @@ impl Request {
     }
 
     // TODO: support custom headers.
-    fn new(method: &str, url: &Url, body: &Option<Vec<u8>>, dump_path: &Option<String>) -> Self {
+    fn new(method: &str, url: &Url, body: &Option<Vec<u8>>, dump_path: &Option<String>, resp_len: u64) -> Self {
         let authority = match url.port() {
             Some(port) => format!("{}:{}", url.host_str().unwrap(), port),
             None => url.host_str().unwrap().to_string(),
@@ -700,8 +751,13 @@ impl Request {
             tquic::h3::Header::new(b":scheme", url.scheme().as_bytes()),
             tquic::h3::Header::new(b":authority", authority.as_bytes()),
             tquic::h3::Header::new(b":path", url[url::Position::BeforePath..].as_bytes()),
+            // req length
+            tquic::h3::Header::new(b":resp-len", resp_len.to_string().as_bytes()),
             tquic::h3::Header::new(b"user-agent", b"tquic"),
         ];
+
+        println!("{:?}", headers[3]);
+
         if body.is_some() {
             headers.push(tquic::h3::Header::new(
                 b"content-length",
@@ -805,11 +861,19 @@ impl RequestSender {
             && (self.option.max_requests_per_conn == 0
                 || self.request_sent < self.option.max_requests_per_conn)
         {
-            if let Err(e) = self.send_request(conn) {
+            let resp_size = self.get_resp_size_in_request();
+            if let Err(e) = self.send_request(conn, resp_size) {
                 error!("{} send request error {}", conn.trace_id(), e);
                 break;
             }
         }
+    }
+
+    pub fn get_resp_size_in_request(&self) -> u64 {
+        let mut worker_ctx = self.worker_ctx.borrow_mut();
+        let resp_len = worker_ctx.resp_sizes[worker_ctx.resp_size_idx];
+        worker_ctx.resp_size_idx += 1;
+        resp_len
     }
 
     /// Receive responses.
@@ -830,10 +894,11 @@ impl RequestSender {
         }
     }
 
-    fn send_request(&mut self, conn: &mut Connection) -> Result<()> {
+    fn send_request(&mut self, conn: &mut Connection, resp_size: u64) -> Result<()> {
         let url = &self.option.urls[self.current_url_idx];
-        let mut request = Request::new("GET", url, &None, &self.option.dump_path);
-        debug!(
+
+        let mut request = Request::new("GET", url, &None, &self.option.dump_path, resp_size);
+        println!(
             "{} send request {} current index {}",
             conn.trace_id(),
             url,
@@ -1012,7 +1077,7 @@ impl RequestSender {
         loop {
             match h3_conn.poll(conn) {
                 Ok((stream_id, tquic::h3::Http3Event::Headers { headers, .. })) => {
-                    debug!(
+                    println!(
                         "{} got response headers {:?} on stream id {}",
                         conn.trace_id(),
                         headers,
@@ -1024,7 +1089,7 @@ impl RequestSender {
                 }
                 Ok((stream_id, tquic::h3::Http3Event::Data)) => {
                     while let Ok(read) = h3_conn.recv_body(conn, stream_id, &mut self.buf) {
-                        debug!(
+                        println!(
                             "{} got {} bytes of response data on stream {}",
                             conn.trace_id(),
                             read,

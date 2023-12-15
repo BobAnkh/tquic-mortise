@@ -280,7 +280,9 @@ struct ConnectionHandler {
 
 impl ConnectionHandler {
     fn generate_file_path(uri: &str, root: &str) -> path::PathBuf {
+        println!("uri: {}", uri);
         let uri = path::Path::new(uri);
+
         let mut path = path::PathBuf::from(root);
 
         for c in uri.components() {
@@ -307,7 +309,7 @@ impl ConnectionHandler {
             None => return Err(format!("request format error {:?}", request_line).into()),
         };
         let path = Self::generate_file_path(uri, &self.root);
-        debug!(
+        println!(
             "{} got GET request for {:?} on stream {}",
             conn.trace_id(),
             path,
@@ -315,7 +317,9 @@ impl ConnectionHandler {
         );
 
         let body = std::fs::read(path.as_path()).unwrap_or_else(|_| b"Not Found!\r\n".to_vec());
-        debug!(
+        // TODO: set size according to configs
+
+        log::info!(
             "{} sending response of size {} on stream {}",
             conn.trace_id(),
             body.len(),
@@ -396,19 +400,28 @@ impl ConnectionHandler {
     }
 
     fn build_h3_response(&self, headers: &[Header]) -> (Vec<Header>, Bytes) {
-        let mut path = "";
+        // let mut path = "";
+        let mut resp_len = 0;
         for header in headers {
-            if header.name() == b":path" {
-                path = std::str::from_utf8(header.value()).unwrap();
+            // if header.name() == b":path" {
+            //     path = std::str::from_utf8(header.value()).unwrap();
+            // }
+            if header.name() == b":resp-len" {
+                resp_len = std::str::from_utf8(header.value())
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+                // println!("resp len {}", resp_len);
             }
         }
-        let path = Self::generate_file_path(path, &self.root);
+        // let path = Self::generate_file_path(path, &self.root);
 
         let (status, body) = {
-            match std::fs::read(path.as_path()) {
-                Ok(data) => (200, data),
-                Err(_) => (404, b"Not Found!".to_vec()),
-            }
+            // match std::fs::read(path.as_path()) {
+            //     Ok(data) => (200, data),
+            //     Err(_) => (404, b"Not Found!".to_vec()),
+            // }
+            (200, vec![77; resp_len])
         };
 
         let headers = vec![
@@ -651,7 +664,7 @@ impl ServerHandler {
             return;
         }
 
-        debug!("{} new connection handler", conn.trace_id());
+        println!("{} new connection handler", conn.trace_id());
         let mut conn_handler = ConnectionHandler {
             root: self.root.clone(),
             ..Default::default()
