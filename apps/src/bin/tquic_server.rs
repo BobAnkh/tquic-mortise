@@ -396,19 +396,28 @@ impl ConnectionHandler {
     }
 
     fn build_h3_response(&self, headers: &[Header]) -> (Vec<Header>, Bytes) {
-        let mut path = "";
+        // let mut path = "";
+        let mut resp_len = 0;
         for header in headers {
-            if header.name() == b":path" {
-                path = std::str::from_utf8(header.value()).unwrap();
+            // if header.name() == b":path" {
+            //     path = std::str::from_utf8(header.value()).unwrap();
+            // }
+            if header.name() == b":resp-len" {
+                resp_len = std::str::from_utf8(header.value())
+                    .unwrap()
+                    .parse::<usize>()
+                    .unwrap();
+                // println!("resp len {}", resp_len);
             }
         }
-        let path = Self::generate_file_path(path, &self.root);
+        // let path = Self::generate_file_path(path, &self.root);
 
         let (status, body) = {
-            match std::fs::read(path.as_path()) {
-                Ok(data) => (200, data),
-                Err(_) => (404, b"Not Found!".to_vec()),
-            }
+            // match std::fs::read(path.as_path()) {
+            //     Ok(data) => (200, data),
+            //     Err(_) => (404, b"Not Found!".to_vec()),
+            // }
+            (200, vec![77; resp_len])
         };
 
         let headers = vec![
@@ -523,9 +532,14 @@ impl ConnectionHandler {
 
     fn send_http09_response(&mut self, conn: &mut Connection, stream_id: u64) {
         let response = self.responses.get_mut(&stream_id).unwrap();
+        let write_granularity: usize = 1500;
+        let mut end = response.body_written + write_granularity;
+        if end >= response.body.len() {
+            end = response.body.len() - 1;
+        }
         let written = match conn.stream_write(
             stream_id,
-            response.body.slice(response.body_written..),
+            response.body.slice(response.body_written..end),
             true,
         ) {
             Ok(v) => v,
