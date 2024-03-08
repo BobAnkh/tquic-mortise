@@ -228,6 +228,10 @@ pub struct ClientOpt {
     /// Batch size for sending packets.
     #[clap(long, default_value = "1", value_name = "NUM")]
     pub send_batch_size: usize,
+
+    /// Path to the trace file. NOTICE: use only one thread for test and one request per connection
+    #[clap(long, value_name = "FILE")]
+    pub trace_file: Option<String>,
 }
 
 const MAX_BUF_SIZE: usize = 65536;
@@ -708,11 +712,18 @@ impl Worker {
 #[derive(Default)]
 struct WorkerContext {
     session: Option<Vec<u8>>,
+    request_to_send: u64,
     request_sent: u64,
     request_done: u64,
     request_success: u64,
+    resp_sizes: Vec<u64>,
+    resp_size_idx: usize,
+    trace_timestamps: Vec<u64>,
+    req_start_timestamps: VecDeque<Instant>,
+    next_trace_idx: usize,
     max_sample: usize,
     request_time_samples: Vec<f64>,
+    request_size_samples: Vec<u64>,
     conn_total: u64,
     conn_handshake_success: u64,
     conn_finish: u64,
@@ -737,6 +748,31 @@ impl WorkerContext {
                 debug!("no session file {:?}", option.session_file);
             }
         }
+
+        let mut timestamps = Vec::new();
+        let mut response_sizes = Vec::new();
+
+        if let Some(trace_file) = &option.trace_file {
+            let trace = File::open(trace_file).unwrap();
+            let reader = io::BufReader::new(trace);
+            for line in reader.lines() {
+                let line = line.unwrap();
+                let parts: Vec<&str> = line.split_whitespace().collect();
+
+                if parts.len() == 2 {
+                    let timestamp = parts[0].parse::<u64>().unwrap_or(0);
+                    let response_size = parts[1].parse::<u64>().unwrap_or(0);
+
+                    timestamps.push(timestamp);
+                    response_sizes.push(response_size);
+                }
+            }
+        }
+        worker_ctx.trace_timestamps = timestamps;
+        worker_ctx.resp_sizes = response_sizes;
+        worker_ctx.resp_size_idx = 0;
+        worker_ctx.next_trace_idx = 0;
+        worker_ctx.req_start_timestamps = VecDeque::new();
 
         worker_ctx
     }
