@@ -526,13 +526,16 @@ impl Worker {
                 break;
             }
 
-            let timeout = self
+            let mut timeout = self
                 .endpoint
                 .timeout()
                 .map(|v| cmp::max(v, TIMER_GRANULARITY));
-
+            
+            if timeout.is_none() {
+                timeout = Some(TIMER_GRANULARITY);
+            }
+            
             self.poll.poll(&mut events, timeout)?;
-
             // Process timeout events
             if events.is_empty() {
                 self.endpoint.on_timeout(Instant::now());
