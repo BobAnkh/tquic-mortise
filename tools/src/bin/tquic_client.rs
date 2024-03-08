@@ -374,6 +374,7 @@ struct ClientContext {
     request_done: u64,
     request_success: u64,
     request_time_samples: Vec<f64>,
+    request_size_samples: Vec<u64>,
     conn_total: u64,
     conn_handshake_success: u64,
     conn_finish: u64,
@@ -1240,23 +1241,69 @@ impl RequestSender {
                         if self.option.print_res {
                             Self::print_body(&self.buf[..read]);
                         }
+                        request.read_bytes += read as u64;
+                        if request.read_bytes >= request.resp_size {
+                            self.request_done += 1;
+                            self.concurrent_requests -= 1;
+                            worker_ctx.request_success += 1;
+                            worker_ctx.request_done += 1;
+                            let request = self.streams.get_mut(&stream_id).unwrap();
+                            Self::sample_request_time(request, &mut worker_ctx);
+                            log::debug!(
+                                "with {} ms, {} done requests with rct {} with con {}",
+                                request.start_time.unwrap().elapsed().as_millis(),
+                                stream_id / 4,
+                                worker_ctx.request_time_samples.last().unwrap(),
+                                self.concurrent_requests
+                            );
+                            self.streams.remove(&stream_id);
+
+                            if self.request_done == self.option.max_requests_per_conn {
+                                worker_ctx.concurrent_conns -= 1;
+                                debug!(
+                                    "{} all requests finished, close connection",
+                                    conn.trace_id()
+                                );
+                                match conn.close(true, 0x00, b"ok") {
+                                    Ok(_) | Err(Error::Done) => (),
+                                    Err(e) => panic!("error closing conn: {:?}", e),
+                                }
+
+                                return;
+                            }
+                        }
                     }
                 }
-                Ok((stream_id, tquic::h3::Http3Event::Finished)) => {
+                Ok((_stream_id, tquic::h3::Http3Event::Finished)) => {
                     debug!(
-                        "{} done requests {}, total {}",
+                        "{} done requests {} {}, total {}",
                         conn.trace_id(),
+                        worker_ctx.request_done,
                         self.request_done,
                         self.option.max_requests_per_conn
                     );
+                    // self.request_done += 1;
+                    // self.concurrent_requests -= 1;
+                    // worker_ctx.request_success += 1;
+                    // worker_ctx.request_done += 1;
+                    // let request = self.streams.get_mut(&stream_id).unwrap();
+                    // Self::sample_request_time(request, &mut worker_ctx);
+                    // debug!("{} done requests with rct {}", stream_id / 4, worker_ctx.request_time_samples.last().unwrap());
+                    // self.streams.remove(&stream_id);
 
-                    self.request_done += 1;
-                    self.concurrent_requests -= 1;
-                    worker_ctx.request_success += 1;
-                    worker_ctx.request_done += 1;
-                    let request = self.streams.get_mut(&stream_id).unwrap();
-                    Self::sample_request_time(request, &mut worker_ctx);
-                    self.streams.remove(&stream_id);
+                    // if self.request_done == self.option.max_requests_per_conn {
+                    //     worker_ctx.concurrent_conns -= 1;
+                    //     debug!(
+                    //         "{} all requests finished, close connection",
+                    //         conn.trace_id()
+                    //     );
+                    //     match conn.close(true, 0x00, b"ok") {
+                    //         Ok(_) | Err(Error::Done) => (),
+                    //         Err(e) => panic!("error closing conn: {:?}", e),
+                    //     }
+
+                    //     return;
+                    // }
                 }
                 Ok((stream_id, tquic::h3::Http3Event::Reset(e))) => {
                     error!(
