@@ -12,12 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use core::panic;
+use core::time;
 use std::cell::RefCell;
 use std::cell::RefMut;
 use std::cmp;
 use std::cmp::max;
+use std::collections::VecDeque;
 use std::fs::create_dir_all;
 use std::fs::File;
+use std::io;
+use std::io::BufRead;
 use std::io::BufWriter;
 use std::io::Write;
 use std::net::Ipv4Addr;
@@ -482,6 +487,7 @@ impl Worker {
                 && (Instant::now() - self.start_time).as_secs() > self.option.duration)
                 || (self.option.max_requests_per_thread > 0
                     && worker_ctx.request_done >= self.option.max_requests_per_thread)
+                || worker_ctx.next_trace_idx >= worker_ctx.trace_timestamps.len()
             {
                 debug!(
                     "worker should exit, concurrent conns {}, request sent {}, request done {}",
@@ -607,6 +613,9 @@ impl Worker {
         client_ctx
             .request_time_samples
             .append(&mut worker_ctx.request_time_samples);
+        client_ctx
+            .request_size_samples
+            .append(&mut worker_ctx.request_size_samples);
         if self.end_time > client_ctx.end_time {
             client_ctx.end_time = self.end_time;
         }
@@ -689,6 +698,8 @@ struct Request {
     headers: Vec<Header>, // Used in h3.
     response_writer: Option<std::io::BufWriter<std::fs::File>>,
     start_time: Option<Instant>,
+    resp_size: u64,
+    read_bytes: u64,
 }
 
 impl Request {
@@ -725,7 +736,13 @@ impl Request {
     }
 
     // TODO: support custom headers.
-    fn new(method: &str, url: &Url, body: &Option<Vec<u8>>, dump_path: &Option<String>) -> Self {
+    fn new(
+        method: &str,
+        url: &Url,
+        body: &Option<Vec<u8>>,
+        dump_path: &Option<String>,
+        resp_len: u64,
+    ) -> Self {
         let authority = match url.port() {
             Some(port) => format!("{}:{}", url.host_str().unwrap(), port),
             None => url.host_str().unwrap().to_string(),
@@ -736,6 +753,8 @@ impl Request {
             tquic::h3::Header::new(b":scheme", url.scheme().as_bytes()),
             tquic::h3::Header::new(b":authority", authority.as_bytes()),
             tquic::h3::Header::new(b":path", url[url::Position::BeforePath..].as_bytes()),
+            // req length
+            tquic::h3::Header::new(b":resp-len", resp_len.to_string().as_bytes()),
             tquic::h3::Header::new(b"user-agent", b"tquic"),
         ];
         if body.is_some() {
@@ -750,6 +769,8 @@ impl Request {
             headers,
             response_writer: Self::make_response_writer(url, dump_path),
             start_time: None,
+            resp_size: 0,
+            read_bytes: 0,
         }
     }
 }
@@ -788,6 +809,9 @@ struct RequestSender {
 
     /// H3 connection, used in h3 mode.
     h3_conn: Option<Http3Connection>,
+
+    /// For debug
+    start_time: Option<Instant>,
 }
 
 impl RequestSender {
@@ -809,6 +833,7 @@ impl RequestSender {
             app_proto: AppProto::H3,
             next_stream_id: 0,
             h3_conn: None,
+            start_time: Some(Instant::now()),
         };
 
         let application_proto = conn.application_proto();
@@ -837,15 +862,72 @@ impl RequestSender {
             self.option.max_requests_per_conn
         );
 
+        // update requests to be sent
+        self.update_new_reqs();
+
+        // TODO: 防止读到尾导致数组index溢出
+        // println!("[before] at time send req {} with avail {} and con req {}",self.request_sent, self.get_request_to_send(), self.concurrent_requests);
         while self.concurrent_requests < self.option.max_concurrent_requests
             && (self.option.max_requests_per_conn == 0
                 || self.request_sent < self.option.max_requests_per_conn)
+            && self.get_request_to_send() > 0
         {
-            if let Err(e) = self.send_request(conn) {
+            let resp_size = self.get_resp_size_in_request();
+            let req_start_time = self.get_req_start_time();
+            log::info!(
+                "at time {} send req {} with avail {} and con req {}",
+                Instant::now()
+                    .duration_since(self.start_time.unwrap())
+                    .as_millis(),
+                self.request_sent,
+                self.get_request_to_send(),
+                self.concurrent_requests
+            );
+            if let Err(e) = self.send_request(conn, resp_size, req_start_time) {
                 error!("{} send request error {}", conn.trace_id(), e);
                 break;
             }
         }
+    }
+
+    pub fn update_new_reqs(&self) {
+        let mut worker_ctx = self.worker_ctx.borrow_mut();
+        if let Some(start_time) = self.start_time {
+            let current_time = Instant::now();
+            while worker_ctx.next_trace_idx < worker_ctx.trace_timestamps.len()
+                && current_time.duration_since(start_time).as_millis()
+                    >= worker_ctx.trace_timestamps[worker_ctx.next_trace_idx] as u128
+            {
+                worker_ctx.next_trace_idx += 1;
+                worker_ctx.request_to_send += 1;
+                worker_ctx.req_start_timestamps.push_back(Instant::now());
+                log::debug!(
+                    "current time {} worker request to send {}",
+                    current_time
+                        .duration_since(self.start_time.unwrap())
+                        .as_millis(),
+                    worker_ctx.request_to_send
+                );
+            }
+        }
+    }
+
+    pub fn get_request_to_send(&self) -> u64 {
+        let worker_ctx = self.worker_ctx.borrow_mut();
+        worker_ctx.request_to_send
+    }
+
+    pub fn get_resp_size_in_request(&self) -> u64 {
+        let mut worker_ctx = self.worker_ctx.borrow_mut();
+        let resp_len = worker_ctx.resp_sizes[worker_ctx.resp_size_idx];
+        worker_ctx.resp_size_idx += 1;
+        worker_ctx.request_to_send -= 1;
+        resp_len
+    }
+
+    pub fn get_req_start_time(&self) -> Instant {
+        let mut worker_ctx = self.worker_ctx.borrow_mut();
+        worker_ctx.req_start_timestamps.pop_front().unwrap()
     }
 
     /// Receive responses.
@@ -866,9 +948,15 @@ impl RequestSender {
         }
     }
 
-    fn send_request(&mut self, conn: &mut Connection) -> Result<()> {
+    fn send_request(
+        &mut self,
+        conn: &mut Connection,
+        resp_size: u64,
+        req_start_time: Instant,
+    ) -> Result<()> {
         let url = &self.option.urls[self.current_url_idx];
-        let mut request = Request::new("GET", url, &None, &self.option.dump_path);
+
+        let mut request = Request::new("GET", url, &None, &self.option.dump_path, resp_size);
         debug!(
             "{} send request {} current index {}",
             conn.trace_id(),
@@ -884,7 +972,9 @@ impl RequestSender {
             unreachable!()
         };
 
-        request.start_time = Some(Instant::now());
+        request.start_time = Some(req_start_time);
+        request.resp_size = resp_size;
+        // log::info!("send request at {:?} with size {}", request.start_time.unwrap(), request.resp_size);
         self.streams.insert(s, request);
         self.current_url_idx += 1;
         if self.current_url_idx == self.option.urls.len() {
@@ -954,11 +1044,12 @@ impl RequestSender {
 
     fn sample_request_time(request: &Request, worker_ctx: &mut RefMut<WorkerContext>) {
         if let Some(start_time) = request.start_time {
-            let request_time = Instant::now() - start_time;
+            let request_time = start_time.elapsed();
             if worker_ctx.request_time_samples.len() < worker_ctx.max_sample {
                 worker_ctx
                     .request_time_samples
-                    .push(request_time.as_micros() as f64);
+                    .push(request_time.as_micros() as f64 / 1000.0);
+                worker_ctx.request_size_samples.push(request.resp_size);
                 return;
             }
 
