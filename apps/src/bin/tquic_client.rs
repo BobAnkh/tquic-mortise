@@ -269,26 +269,27 @@ impl Client {
         let d = context.end_time.unwrap() - self.start_time;
 
         // TODO: support more statistical items.
-        println!();
-        println!(
-            "finished in {:?}, {:.2} req/s",
-            d,
-            context.request_success as f64 / d.as_millis() as f64 * 1000.0
-        );
-        println!(
-            "conns: total {}, finish {}, success {}, failure {}",
-            context.conn_total,
-            context.conn_finish,
-            context.conn_finish_success,
-            context.conn_finish_failed,
-        );
-        println!(
-            "requests: sent {}, finish {}, success {}",
-            context.request_sent, context.request_done, context.request_success,
-        );
+        // println!();
+        // println!(
+        //     "finished in {:?}, {:.2} req/s",
+        //     d,
+        //     context.request_success as f64 / d.as_millis() as f64 * 1000.0
+        // );
+        // println!(
+        //     "conns: total {}, finish {}, success {}, failure {}",
+        //     context.conn_total,
+        //     context.conn_finish,
+        //     context.conn_finish_success,
+        //     context.conn_finish_failed,
+        // );
+        // println!(
+        //     "requests: sent {}, finish {}, success {}",
+        //     context.request_sent, context.request_done, context.request_success,
+        // );
 
-        let mut s = Data::new(context.request_time_samples.clone());
-        println!("time for request(µs):");
+        let s = Data::new(context.request_time_samples.clone());
+
+        // println!("time for request(µs):");
         println!(
             "\tmin: {:.2}, max: {:.2}, mean: {:.2}, sd: {:.2}",
             s.min(),
@@ -296,26 +297,29 @@ impl Client {
             s.mean().unwrap(),
             s.std_dev().unwrap(),
         );
-        println!(
-            "\tmedian: {:.2}, p80: {:.2}, p90: {:.2}, p99: {:.2}",
-            s.median(),
-            s.percentile(80),
-            s.percentile(90),
-            s.percentile(99),
-        );
+        // println!(
+        //     "\tmedian: {:.2}, p80: {:.2}, p90: {:.2}, p99: {:.2}",
+        //     s.median(),
+        //     s.percentile(80),
+        //     s.percentile(90),
+        //     s.percentile(99),
+        // );
 
-        println!(
-            "recv pkts: {}, sent pkts: {}, lost pkts: {}",
-            context.conn_stats.recv_count,
-            context.conn_stats.sent_count,
-            context.conn_stats.lost_count
-        );
-        println!(
-            "recv bytes: {}, sent bytes: {}, lost bytes: {}",
-            context.conn_stats.recv_bytes,
-            context.conn_stats.sent_bytes,
-            context.conn_stats.lost_bytes
-        );
+        // println!(
+        //     "recv pkts: {}, sent pkts: {}, lost pkts: {}",
+        //     context.conn_stats.recv_count,
+        //     context.conn_stats.sent_count,
+        //     context.conn_stats.lost_count
+        // );
+        // println!(
+        //     "recv bytes: {}, sent bytes: {}, lost bytes: {}",
+        //     context.conn_stats.recv_bytes,
+        //     context.conn_stats.sent_bytes,
+        //     context.conn_stats.lost_bytes
+        // );
+        for (t, sz) in context.request_time_samples.iter().zip(context.request_size_samples.iter()) {
+            println!("{} {}", *t, *sz);
+        }
         println!();
     }
 }
