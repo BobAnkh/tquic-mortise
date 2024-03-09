@@ -158,6 +158,15 @@ pub struct Connection {
 
     /// Unique trace id for deubg logging
     trace_id: String,
+
+    /// Total bytes to send
+    unsent_frame_bytes: u64,
+
+    /// Total sent bytes
+    sent_bytes: u64,
+
+    /// Total write bytes
+    write_bytes: u64,
 }
 
 impl Connection {
@@ -266,6 +275,9 @@ impl Connection {
             context: None,
             qlog: None,
             trace_id,
+            unsent_frame_bytes: 0,
+            sent_bytes: 0,
+            write_bytes: 0,
         };
 
         let write_method = conn.get_write_method();
@@ -431,6 +443,11 @@ impl Connection {
         self.try_process_undecryptable_packets()?;
 
         Ok(len - left)
+    }
+
+    /// Get total bytes to send.
+    pub fn get_bytes_to_send(&self) -> u64 {
+        self.unsent_frame_bytes
     }
 
     /// Process an incoming QUIC packet from the peer.
@@ -2176,6 +2193,7 @@ impl Connection {
         let mut len = 0;
         let mut cap: usize = out.len();
 
+        // TODO: better check and flow schedule.
         while let Some(stream_id) = self.streams.peek_sendable() {
             let stream = match self.streams.get_mut(stream_id) {
                 // We should not send frames for streams that were already stopped.
@@ -2185,6 +2203,17 @@ impl Connection {
                     continue;
                 }
             };
+
+            if !stream.resp {
+                self.paths
+                    .get_mut(path_id)?
+                    .recovery
+                    .congestion
+                    .report_resp_size(stream.send.get_total_bytes(), true);
+                self.unsent_frame_bytes += stream.send.get_total_bytes();
+                // println!("stream id {} write {} unsent {}", stream_id, stream.send.get_total_bytes(), self.unsent_frame_bytes);
+                stream.resp = true;
+            }
 
             // Get the lowest offset of data to be sent.
             let stream_off = stream.send.send_off();
@@ -2200,6 +2229,13 @@ impl Connection {
 
             // Read stream data and write into the packet buffer directly.
             let (frame_data_len, fin) = stream.send.read(&mut out[len + frame_hdr_len..])?;
+            self.sent_bytes += frame_data_len as u64;
+            // log::info!("stream {} data len: {} total unsent {} sent {}", stream_id, frame_data_len, self.unsent_frame_bytes, self.sent_bytes);
+            self.paths
+                .get_mut(path_id)?
+                .recovery
+                .congestion
+                .set_unsent_bytes(self.unsent_frame_bytes);
 
             // Retain stream data for reinjection if needed.
             let data = if self.flags.contains(EnableMultipath)
@@ -2237,6 +2273,14 @@ impl Connection {
 
             // If the stream is no longer sendable, remove it from the queue
             if !stream.is_sendable() {
+                self.paths
+                   .get_mut(path_id)?
+                   .recovery
+                   .congestion
+                   .report_resp_size(stream.send.get_total_bytes(), false);
+                self.unsent_frame_bytes -= stream.send.get_total_bytes();
+                // println!("stream {} send {} unsent_bytes {}", stream_id, stream.send.get_total_bytes(), self.unsent_frame_bytes);
+                stream.resp = false;
                 self.streams.remove_sendable();
             }
             // log::info!("")
@@ -3398,6 +3442,8 @@ impl Connection {
                         written,
                     );
                 }
+
+                self.write_bytes += written as u64;
                 Ok(written)
             }
             Err(e) => Err(e),
