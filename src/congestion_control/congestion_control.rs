@@ -167,6 +167,10 @@ pub trait CongestionController {
 
     /// Congestion stats.
     fn stats(&self) -> &CongestionStats;
+
+    fn set_unsent_bytes(&mut self, bytes: u64) {}
+
+    fn report_resp_size(&mut self, bytes: u64, state: bool) {}
 }
 
 impl fmt::Debug for dyn CongestionController {

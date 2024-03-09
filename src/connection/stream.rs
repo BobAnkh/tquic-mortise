@@ -143,6 +143,9 @@ pub struct StreamMap {
 
     /// Unique trace id for debug logging.
     trace_id: String,
+
+    /// Total unsent bytes
+    unsent_bytes: u64,
 }
 
 impl StreamMap {
@@ -177,7 +180,7 @@ impl StreamMap {
 
             local_transport_params: local_params,
             peer_transport_params: StreamTransportParams::default(),
-
+            unsent_bytes: 0,
             ..StreamMap::default()
         }
     }
@@ -204,6 +207,10 @@ impl StreamMap {
             Some(stream) => Some(stream.recv.read_off()),
             None => None,
         }
+    }
+
+    pub fn get_streams_unsent_bytes(&self) -> u64 {
+        self.unsent_bytes
     }
 
     /// Read contiguous data from the stream's receive buffer into the given buffer.
@@ -349,7 +356,6 @@ impl StreamMap {
 
         let urgency = stream.urgency;
         let incremental = stream.incremental;
-
         let sendable = stream.is_sendable();
         let writable = stream.is_writable();
         let empty_fin = buf_len == 0 && fin;
@@ -393,7 +399,7 @@ impl StreamMap {
         if written == 0 && buf_len > 0 {
             return Err(Error::Done);
         }
-
+        self.unsent_bytes += written as u64;
         Ok(written)
     }
 
@@ -1716,6 +1722,12 @@ pub struct Stream {
 
     /// Unique trace id for debug logging.
     trace_id: String,
+
+    /// Whether responsed before
+    pub resp: bool,
+
+    /// how many bytes has read so far
+    pub read_bytes: usize,
 }
 
 impl Stream {
@@ -1768,6 +1780,8 @@ impl Stream {
             flags,
             context: None,
             trace_id: String::new(),
+            resp: false,
+            read_bytes: 0,
         }
     }
 
@@ -1795,6 +1809,10 @@ impl Stream {
     /// them to be sent.
     pub fn is_sendable(&self) -> bool {
         self.send.ready()
+    }
+
+    pub fn get_unsent_bytes(&self) -> u64 {
+        self.send.write_off.saturating_sub(self.send.unsent_off)
     }
 
     /// Return true if the stream is complete.
@@ -2716,6 +2734,10 @@ impl SendBuf {
         self.write_off = self.unsent_off;
 
         (self.fin_off.unwrap(), unsent_len)
+    }
+
+    pub fn get_total_bytes(&self) -> u64 {
+        self.write_off
     }
 
     /// Reset the stream and record the received error code
