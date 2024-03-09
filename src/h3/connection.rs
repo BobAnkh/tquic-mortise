@@ -53,7 +53,7 @@ const PRIORITY_URGENCY_DEFAULT: u8 = 3;
 // It indicates if an HTTP response can be processed incrementally, i.e., provide some meaningful
 // output as chunks of the response arrive.
 // The default value of the incremental parameter is false (0).
-const PRIORITY_INCREMENTAL_DEFAULT: bool = false;
+const PRIORITY_INCREMENTAL_DEFAULT: bool = true;
 // Map HTTP/3 urgency to QUIC urgency in a linear way with this offset, i.e., 1 maps to 125.
 const PRIORITY_URGENCY_OFFSET: u8 = 124;
 
