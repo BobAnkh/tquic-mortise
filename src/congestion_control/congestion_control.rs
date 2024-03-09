@@ -33,6 +33,10 @@ pub use copa::CopaConfig;
 pub use cubic::Cubic;
 pub use cubic::CubicConfig;
 pub use hystart_plus_plus::HystartPlusPlus;
+pub use mortise::Mortise;
+pub use mortise::MortiseConfig;
+pub use mvfst::Mvfst;
+pub use mvfst::MvfstConfig;
 
 /// Available congestion control algorithms.
 #[repr(C)]
@@ -61,6 +65,10 @@ pub enum CongestionControlAlgorithm {
     /// and delay can be configured via a user-specified parameter.
     /// (Experimental)
     Copa,
+
+    Mortise,
+
+    Mvfst,
 }
 
 impl FromStr for CongestionControlAlgorithm {
@@ -75,6 +83,10 @@ impl FromStr for CongestionControlAlgorithm {
             Ok(CongestionControlAlgorithm::Bbr3)
         } else if algor.eq_ignore_ascii_case("copa") {
             Ok(CongestionControlAlgorithm::Copa)
+        } else if algor.eq_ignore_ascii_case("mortise") {
+            Ok(CongestionControlAlgorithm::Mortise)
+        } else if algor.eq_ignore_ascii_case("mvfst") {
+            Ok(CongestionControlAlgorithm::Mvfst)
         } else {
             Err(Error::InvalidConfig("unknown".into()))
         }
@@ -218,6 +230,24 @@ pub fn build_congestion_controller(
             ),
             connection_trace_id,
         )),
+        CongestionControlAlgorithm::Mortise => Box::new(Mortise::new(
+            MortiseConfig::new(
+                min_cwnd,
+                initial_cwnd,
+                Some(conf.initial_rtt),
+                max_datagram_size,
+            ),
+            connection_trace_id,
+        )),
+        CongestionControlAlgorithm::Mvfst => Box::new(Mvfst::new(
+            MvfstConfig::new(
+                min_cwnd,
+                initial_cwnd,
+                Some(conf.initial_rtt),
+                max_datagram_size,
+            ),
+            connection_trace_id,
+        )),
     }
 }
 
@@ -295,6 +325,13 @@ mod tests {
 mod bbr;
 mod bbr3;
 mod copa;
+
+#[path = "mortise/mortise.rs"]
+mod mortise;
+
+#[path = "mvfst/mvfst.rs"]
+mod mvfst;
+
 mod cubic;
 mod delivery_rate;
 mod hystart_plus_plus;
