@@ -201,7 +201,7 @@ pub struct ClientOpt {
 
     /// Path to the trace file. NOTICE: use only one thread for test and one request per connection
     #[clap(long, value_name = "FILE")]
-    pub trace_file: Option<String>,
+    pub workload_trace: Option<String>,
 }
 
 const MAX_BUF_SIZE: usize = 65536;
@@ -674,8 +674,8 @@ impl WorkerContext {
         let mut timestamps = Vec::new();
         let mut response_sizes = Vec::new();
 
-        if let Some(trace_file) = &option.trace_file {
-            let trace = File::open(trace_file).unwrap();
+        if let Some(workload_trace) = &option.workload_trace {
+            let trace = File::open(workload_trace).unwrap();
             let reader = io::BufReader::new(trace);
             for line in reader.lines() {
                 let line = line.unwrap();
