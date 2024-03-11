@@ -107,7 +107,7 @@ pub struct ClientOpt {
     #[clap(short, long, default_value = "0", value_name = "TIME")]
     pub duration: u64,
 
-    /// Number of max samples per thread used for requess.t time statistic
+    /// Number of max samples per thread used for request time statistic
     #[clap(long, default_value = "100000", value_name = "NUM")]
     pub max_sample: usize,
 
@@ -873,7 +873,6 @@ impl RequestSender {
         // update requests to be sent
         self.update_new_reqs();
 
-        // TODO: 防止读到尾导致数组index溢出
         // println!("[before] at time send req {} with avail {} and con req {}",self.request_sent, self.get_request_to_send(), self.concurrent_requests);
         while self.concurrent_requests < self.option.max_concurrent_requests
             && (self.option.max_requests_per_conn == 0
