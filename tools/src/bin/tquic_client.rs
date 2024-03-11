@@ -961,7 +961,6 @@ impl RequestSender {
         // update requests to be sent
         self.update_new_reqs();
 
-        // TODO: 防止读到尾导致数组index溢出
         // println!("[before] at time send req {} with avail {} and con req {}",self.request_sent, self.get_request_to_send(), self.concurrent_requests);
         while self.concurrent_requests < self.option.max_concurrent_requests
             && (self.option.max_requests_per_conn == 0
