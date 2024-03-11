@@ -3,34 +3,32 @@
 traces=("trace-2925703-home1"
     "trace-3458374-timessquare" "trace-3219061-home" "trace-3457194-timessquare" "trace-3201711-timessquare" "trace-3202253-timessquare" "trace-3205967-timessquare" "trace-2767958-taxi1" "trace-3205967-timessquare"
     "trace-3109898-bus")
-
-# traces=("${traces[0]}")
-traces=("trace-3458374-timessquare" )
-# traces=("lte-trace1" "lte-trace2")
-# ccas=("copa" "mvfst")
-# ccas=("mortise" "mvfst" "bbr" "cubic" "bbr3")
-ccas=("mortise")
-# ccas=("$1")
-# losses=(0.0 0.002 0.01)
-losses=(0.0)
-# losses=(0.001 0.005)
+ccas=("mortise" "mvfst" "bbr" "cubic" "bbr3")
 delays=(20 60 150)
-# delays=(20)
-# 对应的就是分子和分母
-# buffers=(0.5 1 1.5)
+losses=(0.0 0.002 0.01)
 qsize_coeff1=(1 2 6)
 qsize_coeff2=(2 2 2)
-# qsize_coeff1=(2)
-# qsize_coeff2=(2)
 iteration=2
-# mortise可以根据当前并发流数是否用满，判断是否需要尽快迸发
 MAX_CONCURR_REQ=20
 MAX_REQS=500
 WORKLOAD_FILE="./workload/workload-0.5s"
 MAX_CONCURR_TASKS=4
 LOG_ROOT_DIR="./test_cmp_0.5s"
 TRACE_DIR="./traces/realworld/cellular"
-# log_dir="logs"
+
+# traces=("trace-3458374-timessquare" )
+# ccas=("mortise" "mvfst" "bbr" "cubic" "bbr3")
+# delays=(20 60 150)
+# losses=(0.0 0.002 0.01)
+# qsize_coeff1=(1 2 6)
+# qsize_coeff2=(2 2 2)
+# iteration=2
+# MAX_CONCURR_REQ=20
+# MAX_REQS=500
+# WORKLOAD_FILE="./workload/workload-0.5s"
+# MAX_CONCURR_TASKS=4
+# LOG_ROOT_DIR="./test_cmp_0.5s"
+# TRACE_DIR="./traces/realworld/cellular"
 
 cur_running_tasks=0
 task_pids=()
@@ -45,10 +43,10 @@ for loss in "${losses[@]}"; do
     for trace in "${traces[@]}"; do
     for delay in "${delays[@]}"; do
         for ((idx=0; idx < "${#qsize_coeff1[@]}"; idx++)); do
-            # 按平均吞吐为6Mbps计算   
-            fenzi="${qsize_coeff1[$idx]}"
-            fenmu="${qsize_coeff2[$idx]}"
-            qsize=$((2 * delay * 4 * fenzi / 12 / fenmu))
+            # assume the average bw as 6Mbps   
+            numerator="${qsize_coeff1[$idx]}"
+            denumerator="${qsize_coeff2[$idx]}"
+            qsize=$((2 * delay * 4 * numerator / 12 / denumerator))
             # qsize=40
             echo "queue: $qsize"
             for cca in "${ccas[@]}"; do
@@ -66,14 +64,14 @@ for loss in "${losses[@]}"; do
                                 wait "$pid"
                             done
                             # exit 1
-                            echo "[Multitask] $MAX_CONCURR_TASKS Tasks done"
+                            echo "[Multitask] $MAX_CONCURR_TASKS tasks done"
                             cur_running_tasks=0
                             task_pids=()
                         else
                             ./run_single_exp.sh $delay $qsize $loss $cca $trace_path $port $log_path $result_path $MAX_CONCURR_REQ $MAX_REQS $WORKLOAD_FILE &
                             task_pids+=($!)
                             cur_running_tasks=$((cur_running_tasks + 1))
-                            echo "[Multitask] $cur_running_tasks Tasks running..."
+                            echo "[Multitask] $cur_running_tasks tasks running..."
                             sleep 1
                         fi
                     done
