@@ -107,7 +107,7 @@ pub struct ClientOpt {
     #[clap(short, long, default_value = "0", value_name = "TIME")]
     pub duration: u64,
 
-    /// Number of max samples per thread used for requess.t time statistic
+    /// Number of max samples per thread used for request time statistic
     #[clap(long, default_value = "100000", value_name = "NUM")]
     pub max_sample: usize,
 
