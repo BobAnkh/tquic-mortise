@@ -1568,7 +1568,7 @@ mod tests {
         let mut conf = new_test_recovery_config();
         conf.pto_linear_factor = 2;
         conf.max_pto = MAX_PTO_UT;
-        let mut recovery = Recovery::new(&conf);
+        let mut recovery = Recovery::new(&conf, String::new());
         recovery.pto_count = count;
 
         let duration = recovery.calculate_pto();

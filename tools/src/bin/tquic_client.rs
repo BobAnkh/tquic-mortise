@@ -54,8 +54,8 @@ use statrs::statistics::Data;
 use statrs::statistics::Distribution;
 use statrs::statistics::Max;
 use statrs::statistics::Min;
-use statrs::statistics::OrderStatistics;
 use tquic::h3::NameValue;
+use tquic::CongestionControlAlgorithm;
 use url::Url;
 
 use tquic::connection::ConnectionStats;
@@ -64,7 +64,6 @@ use tquic::h3::connection::Http3Connection;
 use tquic::h3::Header;
 use tquic::h3::Http3Config;
 use tquic::Config;
-use tquic::CongestionControlAlgorithm;
 use tquic::Connection;
 use tquic::Endpoint;
 use tquic::MultipathAlgorithm;
@@ -233,6 +232,10 @@ pub struct ClientOpt {
     /// Batch size for sending packets.
     #[clap(long, default_value = "1", value_name = "NUM")]
     pub send_batch_size: usize,
+
+    /// Congestion Control Algorithm.
+    #[clap(short = 'C', long, default_value = "cubic")]
+    pub cong_control: CongestionControlAlgorithm,
 
     /// Path to the trace file. NOTICE: use only one thread for test and one request per connection
     #[clap(long, value_name = "FILE")]
@@ -574,10 +577,12 @@ impl Worker {
             return true;
         }
 
+        // Check close.
         if (self.option.duration > 0
             && (Instant::now() - self.start_time).as_secs() > self.option.duration)
             || (self.option.max_requests_per_thread > 0
                 && worker_ctx.request_done >= self.option.max_requests_per_thread)
+            || worker_ctx.next_trace_idx >= worker_ctx.trace_timestamps.len()
         {
             debug!(
                 "worker should exit, concurrent conns {}, request sent {}, request done {}",
@@ -585,7 +590,6 @@ impl Worker {
             );
             return true;
         }
-
         false
     }
 
