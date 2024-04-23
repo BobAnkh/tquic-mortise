@@ -6,4 +6,4 @@ workload=$4
 result_path=$5
 
 # shellcheck disable=SC2086
-./target/release/tquic_client --log-level Info --connect-to $MAHIMAHI_BASE:$port https://tsinghua.com/example.org --max-requests-per-thread $max_requests_per_thread --max-requests-per-conn $max_requests_per_thread  --max-concurrent-requests $max_concurrent_requests --trace-file $workload -C BBR  >> $result_path 2>&1
+./target/release/tquic_client --log-level Info --connect-to $MAHIMAHI_BASE:$port https://tsinghua.com/example.org --max-requests-per-thread $max_requests_per_thread --max-requests-per-conn $max_requests_per_thread  --max-concurrent-requests $max_concurrent_requests --workload-trace $workload -C BBR  >> $result_path 2>&1
