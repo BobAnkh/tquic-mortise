@@ -94,11 +94,11 @@ pub struct ClientOpt {
     pub max_concurrent_conns: u32,
 
     /// Number of requests per thread. "0" means infinity mode.
-    #[clap(long, default_value = "100", value_name = "NUM")]
+    #[clap(long, default_value = "1", value_name = "NUM")]
     pub max_requests_per_thread: u64,
 
     /// Number of max requests per connection. "0" means infinity mode.
-    #[clap(long, default_value = "0", value_name = "NUM")]
+    #[clap(long, default_value = "1", value_name = "NUM")]
     pub max_requests_per_conn: u64,
 
     /// Number of max concurrent requests per connection.
@@ -198,11 +198,11 @@ pub struct ClientOpt {
     pub send_udp_payload_size: usize,
 
     /// Handshake timeout in microseconds.
-    #[clap(long, default_value = "200000", value_name = "TIME")]
+    #[clap(long, default_value = "10000", value_name = "TIME")]
     pub handshake_timeout: u64,
 
     /// Connection idle timeout in microseconds.
-    #[clap(long, default_value = "60000", value_name = "TIME")]
+    #[clap(long, default_value = "30000", value_name = "TIME")]
     pub idle_timeout: u64,
 
     /// Initial RTT in milliseconds.
