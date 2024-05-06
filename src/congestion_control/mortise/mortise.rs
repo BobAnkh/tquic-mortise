@@ -834,8 +834,8 @@ impl Mortise {
         }
 
 
-        // 对于当前的unsent_bytes，小流我们无法优化，只能控制大流来为可能到来的未来小流让步。
-        // 简单考虑当前所有unsent_bytes为同一条大流
+        // For the current unsent_bytes, we cannot optimize the small streams, and can only control the large streams to make way for potential future small streams.
+        // Simply consider all current unsent_bytes as part of a single large stream.
         let min_rtt = self.min_rtt_filter.get() as f64 / 1_000.0;
         let mut opt_delta = self.delta;
         // in seconds
