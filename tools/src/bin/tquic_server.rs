@@ -170,10 +170,6 @@ pub struct ServerOpt {
     /// Batch size for sending packets.
     #[clap(long, default_value = "16", value_name = "NUM")]
     pub send_batch_size: usize,
-
-    /// Congestion Control Algorithm.
-    #[clap(short = 'C', long, default_value = "cubic")]
-    pub cong_control: CongestionControlAlgorithm,
 }
 
 const MAX_BUF_SIZE: usize = 65536;

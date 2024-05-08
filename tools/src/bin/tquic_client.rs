@@ -233,10 +233,6 @@ pub struct ClientOpt {
     #[clap(long, default_value = "1", value_name = "NUM")]
     pub send_batch_size: usize,
 
-    /// Congestion Control Algorithm.
-    #[clap(short = 'C', long, default_value = "cubic")]
-    pub cong_control: CongestionControlAlgorithm,
-
     /// Path to the trace file. NOTICE: use only one thread for test and one request per connection
     #[clap(long, value_name = "FILE")]
     pub workload_trace: Option<String>,
@@ -311,7 +307,7 @@ impl Client {
 
     fn stats(&self) {
         let context = self.context.lock().unwrap();
-        let d = context.end_time.unwrap() - self.start_time;
+        // let d = context.end_time.unwrap() - self.start_time;
 
         // TODO: support more statistical items.
         // println!();

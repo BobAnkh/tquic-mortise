@@ -407,7 +407,7 @@ impl Mortise {
         // Read the exact flow_id
         stream.read_exact(&mut buf).unwrap();
         let flow_id = u32::from_be_bytes(buf);
-        let mut py_stream = UnixStream::connect("/tmp/mortise-py.sock")
+        let mut _py_stream = UnixStream::connect("/tmp/mortise-py.sock")
             .map_err(|e| log::error!("Test error {}", e))
             .ok();
         // An example on how to report to python manager
@@ -441,7 +441,7 @@ impl Mortise {
             stream,
             shared_memory_handler: None,
             rate_residuals: VecDeque::new(),
-            py_stream,
+            py_stream: _py_stream,
             rate_ewma: f64::MIN,
             rate_ewmv: 0.0,
             intervals_cnt: 0,
